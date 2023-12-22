@@ -1,9 +1,21 @@
 var LogsModel = require("../models/logs");
+const redis = require("redis");
 
-// const { stringify } = require('circular-json');
+let redisClient;
 
-exports.searchLog = (req, res) => {
+(async () => {
+  redisClient = redis.createClient();
+
+  redisClient.on("error", (error) => console.error(`Error : ${error}`));
+
+  await redisClient.connect();
+})();
+
+exports.searchLog = async (req, res) => {
   const queryParams = [];
+
+  let results;
+  let isCached = false;
 
   for (const key in req.query) {
     queryParams.push({
@@ -16,10 +28,26 @@ exports.searchLog = (req, res) => {
     query[param.key] = param.value;
   });
 
+  const cacheKey = JSON.stringify(query);
+
   console.log(queryParams);
-  LogsModel.find(query)
-    .then((items) => res.json(items))
-    .catch((error) =>
-      res.status(500).send("Error occurred in fetching the cart")
-    );
+
+  try {
+    const cacheResults = await redisClient.get(cacheKey);
+    if (cacheResults) {
+      isCached = true;
+      results = JSON.parse(cacheResults);
+    } else {
+      // Use async/await to wait for the MongoDB query to complete
+      results = await LogsModel.find(query);
+      await redisClient.set(cacheKey, JSON.stringify(results));
+    }
+    res.json(results);
+    if(isCached) {
+      console.log("Cahsessd");
+    }
+  } catch (error) {
+    console.error(error);
+    res.status(404).send("Data unavailable");
+  }
 };
